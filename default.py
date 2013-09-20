@@ -3,6 +3,7 @@ import urllib2
 import re
 import os
 import json
+import cookielib
 import xbmcplugin
 import xbmcgui
 import xbmcvfs
@@ -13,9 +14,12 @@ from urlparse import urlparse, parse_qs
 from BeautifulSoup import BeautifulSoup
 
 addon = xbmcaddon.Addon(id='plugin.audio.iheart')
-home = xbmc.translatePath(addon.getAddonInfo('path'))
-icon = os.path.join(home, 'icon.png')
-fanart = os.path.join(home, 'fanart.jpg')
+addon_path = xbmc.translatePath(addon.getAddonInfo('path'))
+addon_profile = xbmc.translatePath(addon.getAddonInfo('profile'))
+cookie_file = os.path.join(addon_profile, 'cookie_file')
+cookie_jar = cookielib.LWPCookieJar(cookie_file)
+icon = os.path.join(addon_path, 'icon.png')
+fanart = os.path.join(addon_path, 'fanart.jpg')
 base_url = 'http://www.iheart.com'
 debug = addon.getSetting('debug')
 addon_version = addon.getAddonInfo('version')
@@ -32,11 +36,18 @@ def addon_log(string):
 def make_request(url, data=None, headers=None):
     addon_log('Request URL: %s' %url)
     if headers is None:
-        headers = {'User-agent' : '	Mozilla/5.0 (Windows NT 6.1; WOW64; rv:22.0) Gecko/20100101 Firefox/22.0',
+        headers = {'User-agent' : 'Mozilla/5.0 (Windows NT 6.1; WOW64; rv:22.0) Gecko/20100101 Firefox/22.0',
                    'Referer' : base_url}
+    if not xbmcvfs.exists(cookie_file):
+        addon_log('Creating cookie_file!')
+        cookie_jar.save()
+    cookie_jar.load(cookie_file, ignore_discard=True, ignore_expires=True)
+    opener = urllib2.build_opener(urllib2.HTTPCookieProcessor(cookie_jar))
+    urllib2.install_opener(opener)
     try:
         req = urllib2.Request(url, data, headers)
         response = urllib2.urlopen(req)
+        cookie_jar.save(cookie_file, ignore_discard=True, ignore_expires=False)
         data = response.read()
         addon_log(str(response.info()))
         redirect_url = response.geturl()
@@ -51,6 +62,16 @@ def make_request(url, data=None, headers=None):
             addon_log('Reason: ', e.reason)
         if hasattr(e, 'code'):
             addon_log('We failed with error code - %s.' %e.code)
+
+
+def login():
+    url = 'http://www.iheart.com/a/account/login/?_country=US&_rel=507'
+    post_data = {'email': addon.getSetting('email'), 'password': addon.getSetting('password')}
+    data = make_request(url, urllib.urlencode(post_data))
+    if eval(data)['ok'] == 1:
+        addon_log('Successfully Logged In')
+    else:
+        xbmc.executebuiltin("XBMC.Notification(iHeartRadio,%s,5000,%s)" %('Login Failed', icon))
 
 
 def scrape_categories():
@@ -80,33 +101,31 @@ def scrape_categories():
         except:
             addon_log('exception local data: %s' %format_exc())
 
-    items = [soup.find('h3', text='By Genre').findAllNext('ul')[:2],
+    items = [soup.find('ul', attrs={'class': 'js-talk'})('a'),
+             soup.find('ul', attrs={'class': 'js-genres'})('a'),
              soup('select', attrs={'name': 'state'})[0]('option'),
              soup('select', attrs={'name': 'market'})[0]('option')]
-
     categories = {'local': (local_name, local_url, country, rel),
-                  'genre': [(i.string, i['href']) for i in items[0][0]('a')+items[0][1]('a')],
-                  'state': [(i.string, i['value']) for i in items[1] if len(i['value']) > 0],
-                  'city': [(i.string, i['value']) for i in items[2] if len(i['value']) > 0]}
+                  'talk': [(i.string, i['href']) for i in items[0]],
+                  'genre': [(i.string, i['href']) for i in items[1]],
+                  'state': [(i.string, i['value']) for i in items[2] if len(i['value']) > 0],
+                  'city': [(i.string, i['value']) for i in items[3] if len(i['value']) > 0]}
 
     return categories
 
 
 def add_stations(url):
     soup = BeautifulSoup(make_request(base_url+url), convertEntities=BeautifulSoup.HTML_ENTITIES)
-    items = []
-    try: items += soup.findAll('li', attrs={'class': "act-nowPlaying"})
-    except: pass
-    try: items += soup('li', attrs={'class': "clearfix"})
-    except: pass
+    try: items = soup.find('ul', attrs={'class': 'strips js-sortable'})('li')
+    except:
+        addon_log('exception add_stations items: %s' %format_exc())
+        return
     addon_log('Found %s stations.' %len(items))
     for i in items:
         try:
             name = i['data-name']
-            try: name += ' - %s' %i('span')[1]['data-description']
-            except: pass
             item_url = i.a['href']
-            iconimage = urllib.unquote(re.findall('background-image: url\(.+?&img=(.+?)\)', i.a['style'])[0])
+            iconimage = 'http://' + re.findall("background-image: url\(.+?\)/(.+?)'\)", str(i))[0]
             add_station(name.encode('utf-8'), item_url, iconimage)
         except:
             addon_log('exception add_stations: %s' %format_exc())
@@ -116,7 +135,7 @@ def resolve_url(url):
     headers = {'User-agent' : 'Mozilla/5.0 (Windows NT 6.1; WOW64; rv:22.0) Gecko/20100101 Firefox/22.0',
                'Referer' : base_url+url}
     local = cache.cacheFunction(scrape_categories)['local']
-    json_url = ('http://www.iheart.com/a/live/station/%sstream/?_country=%s&_rel=%s'
+    json_url = ('http://www.iheart.com/a/live/station/%s/stream/?_country=%s&_rel=%s'
                 %(url.split('-')[-1], local[2], local[3]))
     addon_log('json_url: %s' %json_url)
     data = json.loads(make_request(json_url, '', headers))
@@ -164,6 +183,7 @@ def add_categories():
     cats = cache.cacheFunction(scrape_categories)
     if len(cats['local'][0]) > 0:
         add_dir('Local Stations: '+cats['local'][0], cats['local'][1], 2, icon)
+    add_dir('Talk Radio', 'talk', 1, icon)
     add_dir('By Genre', 'genre', 1, icon)
     add_dir('By State', 'state', 1, icon)
     add_dir('By City', 'city', 1, icon)
@@ -189,40 +209,40 @@ def search():
 
 
 def add_station(name, item_url, iconimage, context=None):
-        params = {'name': name, 'url': item_url, 'mode': 3}
-        url = '%s?%s' %(sys.argv[0], urllib.urlencode(params))
-        listitem = xbmcgui.ListItem(name, iconImage=iconimage, thumbnailImage=iconimage)
-        fav_mode = 4
-        menu_string = 'Add to Add-on Favorites'
-        if context == 'fav':
-            fav_mode = 6
-            menu_string = 'Remove from Favorites'
-        fav_params = {'name': name, 'url': item_url, 'mode': fav_mode, 'iconimage': iconimage}
-        listitem.addContextMenuItems(
-            [(menu_string, 'XBMC.RunPlugin(%s?%s)' %(sys.argv[0], urllib.urlencode(fav_params)))])
-        listitem.setProperty('IsPlayable', 'true')
-        listitem.setProperty("Fanart_Image", fanart)
-        xbmcplugin.addDirectoryItem(int(sys.argv[1]), url, listitem, False)
+    params = {'name': name, 'url': item_url, 'mode': 3}
+    url = '%s?%s' %(sys.argv[0], urllib.urlencode(params))
+    listitem = xbmcgui.ListItem(name, iconImage=iconimage, thumbnailImage=iconimage)
+    fav_mode = 4
+    menu_string = 'Add to Add-on Favorites'
+    if context == 'fav':
+        fav_mode = 6
+        menu_string = 'Remove from Favorites'
+    fav_params = {'name': name, 'url': item_url, 'mode': fav_mode, 'iconimage': iconimage}
+    listitem.addContextMenuItems(
+        [(menu_string, 'XBMC.RunPlugin(%s?%s)' %(sys.argv[0], urllib.urlencode(fav_params)))])
+    listitem.setProperty('IsPlayable', 'true')
+    listitem.setProperty("Fanart_Image", fanart)
+    xbmcplugin.addDirectoryItem(int(sys.argv[1]), url, listitem, False)
 
 
 def add_dir(name, url, mode, iconimage):
-        params = {'name': name, 'url': url, 'mode': mode}
-        url = '%s?%s' %(sys.argv[0], urllib.urlencode(params))
-        listitem = xbmcgui.ListItem(name, iconImage=iconimage, thumbnailImage=iconimage)
-        listitem.setProperty("Fanart_Image", fanart)
-        xbmcplugin.addDirectoryItem(int(sys.argv[1]), url, listitem, True)
+    params = {'name': name, 'url': url, 'mode': mode}
+    url = '%s?%s' %(sys.argv[0], urllib.urlencode(params))
+    listitem = xbmcgui.ListItem(name, iconImage=iconimage, thumbnailImage=iconimage)
+    listitem.setProperty("Fanart_Image", fanart)
+    xbmcplugin.addDirectoryItem(int(sys.argv[1]), url, listitem, True)
 
 
 def add_favorite(name, url, iconimage):
-        favorites = xbmcvfs.exists(favorites_file)
-        if not favorites:
-            fav_list = []
-        else:
-            fav_list = eval(open(favorites_file).read())
-        fav_list.append((name, url, iconimage))
-        a = open(favorites_file, "w")
-        a.write(repr(fav_list))
-        a.close()
+    favorites = xbmcvfs.exists(favorites_file)
+    if not favorites:
+        fav_list = []
+    else:
+        fav_list = eval(open(favorites_file).read())
+    fav_list.append((name, url, iconimage))
+    a = open(favorites_file, "w")
+    a.write(repr(fav_list))
+    a.close()
 
 
 def get_favorites():
