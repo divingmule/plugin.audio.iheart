@@ -75,7 +75,7 @@ def login():
 
 
 def scrape_categories():
-    soup = BeautifulSoup(make_request(base_url+'/find'), convertEntities=BeautifulSoup.HTML_ENTITIES)
+    soup = BeautifulSoup(make_request(base_url+'/find'))
     script = None
     local_url = ''
     local_name = ''
@@ -95,6 +95,7 @@ def scrape_categories():
             c_ip = re.findall("clientIp: '(.+?)',", script)[0]
             near_by_url = ('http://www.iheart.com/a/misc/detect_market/%s/?_country=%s&_rel=%s'
                            %(c_ip, country, rel))
+            addon_log(near_by_url)
             data = json.loads(make_request(near_by_url))
             local_url = data['url']
             local_name = data['name'].encode('utf-8')
@@ -104,7 +105,7 @@ def scrape_categories():
     items = [soup.find('ul', attrs={'class': 'js-talk'})('a'),
              soup.find('ul', attrs={'class': 'js-genres'})('a'),
              soup('select', attrs={'name': 'state'})[0]('option'),
-             soup('select', attrs={'name': 'market'})[0]('option')]
+             soup('select', attrs={'name': 'city'})[0]('option')]
     categories = {'local': (local_name, local_url, country, rel),
                   'talk': [(i.string, i['href']) for i in items[0]],
                   'genre': [(i.string, i['href']) for i in items[1]],
