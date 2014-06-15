@@ -117,7 +117,7 @@ def scrape_categories():
 
 def add_stations(url):
     soup = BeautifulSoup(make_request(base_url+url), convertEntities=BeautifulSoup.HTML_ENTITIES)
-    try: items = soup.find('ul', attrs={'class': 'strips js-sortable'})('li')
+    try: items = soup.find('ul', attrs={'class': 'station-list medium js-sortable'})('li')
     except:
         addon_log('exception add_stations items: %s' %format_exc())
         return
@@ -126,7 +126,7 @@ def add_stations(url):
         try:
             name = i['data-name']
             item_url = i.a['href']
-            iconimage = 'http://' + re.findall("background-image: url\(.+?\)/(.+?)'\)", str(i))[0]
+            iconimage = i.a.img['src']
             add_station(name.encode('utf-8'), item_url, iconimage)
         except:
             addon_log('exception add_stations: %s' %format_exc())
@@ -142,7 +142,7 @@ def resolve_url(url):
     data = json.loads(make_request(json_url, '', headers))
     playback_url = None
     try:
-        playback_url = data['shoutcast_url']
+        playback_url = data['streams']['shoutcast_stream']
         addon_log('playback_url: %s' %playback_url)
     except:
         addon_log('playback_url exception')
