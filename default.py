@@ -75,7 +75,7 @@ def login():
 
 
 def scrape_categories():
-    soup = BeautifulSoup(make_request(base_url+'/find'), convertEntities=BeautifulSoup.HTML_ENTITIES)
+    soup = BeautifulSoup(make_request(base_url+'/find'))
     script = None
     local_url = ''
     local_name = ''
@@ -95,6 +95,7 @@ def scrape_categories():
             c_ip = re.findall("clientIp: '(.+?)',", script)[0]
             near_by_url = ('http://www.iheart.com/a/misc/detect_market/%s/?_country=%s&_rel=%s'
                            %(c_ip, country, rel))
+            addon_log(near_by_url)
             data = json.loads(make_request(near_by_url))
             local_url = data['url']
             local_name = data['name'].encode('utf-8')
@@ -104,7 +105,7 @@ def scrape_categories():
     items = [soup.find('ul', attrs={'class': 'js-talk'})('a'),
              soup.find('ul', attrs={'class': 'js-genres'})('a'),
              soup('select', attrs={'name': 'state'})[0]('option'),
-             soup('select', attrs={'name': 'market'})[0]('option')]
+             soup('select', attrs={'name': 'city'})[0]('option')]
     categories = {'local': (local_name, local_url, country, rel),
                   'talk': [(i.string, i['href']) for i in items[0]],
                   'genre': [(i.string, i['href']) for i in items[1]],
@@ -116,7 +117,7 @@ def scrape_categories():
 
 def add_stations(url):
     soup = BeautifulSoup(make_request(base_url+url), convertEntities=BeautifulSoup.HTML_ENTITIES)
-    try: items = soup.find('ul', attrs={'class': 'strips js-sortable'})('li')
+    try: items = soup.find('ul', attrs={'class': 'station-list medium js-sortable'})('li')
     except:
         addon_log('exception add_stations items: %s' %format_exc())
         return
@@ -125,7 +126,7 @@ def add_stations(url):
         try:
             name = i['data-name']
             item_url = i.a['href']
-            iconimage = 'http://' + re.findall("background-image: url\(.+?\)/(.+?)'\)", str(i))[0]
+            iconimage = i.a.img['src']
             add_station(name.encode('utf-8'), item_url, iconimage)
         except:
             addon_log('exception add_stations: %s' %format_exc())
@@ -141,7 +142,7 @@ def resolve_url(url):
     data = json.loads(make_request(json_url, '', headers))
     playback_url = None
     try:
-        playback_url = data['shoutcast_url']
+        playback_url = data['streams']['shoutcast_stream']
         addon_log('playback_url: %s' %playback_url)
     except:
         addon_log('playback_url exception')
