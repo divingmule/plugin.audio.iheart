@@ -1,3 +1,6 @@
+Version 0.0.5
+rewrite pre-release
+
 Version 0.0.2
 fix website changes
 
