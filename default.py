@@ -62,7 +62,7 @@ def get_stations(data=None):
         for i in data['values']:
             item = {}
             if i['content'].has_key('streams'):
-                item['label'] = i['label']
+                item['label'] = i['label'].encode('utf-8')
                 item['sub_label'] = i['subLabel']
                 item['id'] = i['content']['id']
                 item['genre'] = i['content']['genres'][0]['name']
@@ -75,7 +75,7 @@ def get_stations(data=None):
         for i in data['hits']:
             item = {}
             if i.has_key('streams'):
-                item['label'] = i['name']
+                item['label'] = i['name'].encode('utf-8')
                 item['sub_label'] = i['description']
                 item['id'] = i['id']
                 item['genre'] = i['genres'][0]['name']
