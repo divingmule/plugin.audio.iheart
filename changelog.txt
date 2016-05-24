@@ -1,3 +1,9 @@
+Version 0.0.6
+added live station search
+added add-on favorites
+added podcasts
+improved genre search results
+
 Version 0.0.5
 rewrite pre-release
 
