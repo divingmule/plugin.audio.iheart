@@ -1,13 +1,9 @@
-import urllib
-import urllib2
+import requests
 import os
-import json
-import time
-from traceback import format_exc
-from urlparse import urlparse, parse_qs
+import re
+from urllib import urlencode, unquote_plus, quote_plus
 
 import StorageServer
-from BeautifulSoup import BeautifulSoup, BeautifulStoneSoup
 
 import xbmcplugin
 import xbmcgui
@@ -16,58 +12,61 @@ import xbmcaddon
 
 addon = xbmcaddon.Addon()
 addon_id = addon.getAddonInfo('id')
-addon_path = xbmc.translatePath(addon.getAddonInfo('path'))
+addon_version = addon.getAddonInfo('version')
+addon_path = addon.getAddonInfo('path')
 addon_profile = xbmc.translatePath(addon.getAddonInfo('profile'))
 addon_fanart = addon.getAddonInfo('fanart')
 addon_icon = addon.getAddonInfo('icon')
-base_url = 'https://api2.iheart.com/api'
-addon_version = addon.getAddonInfo('version')
-cache = StorageServer.StorageServer("iheart", 1)
-profile = xbmc.translatePath(addon.getAddonInfo('profile'))
-if not xbmcvfs.exists(profile):
-    xbmcvfs.mkdirs(profile)
-favorites_file = os.path.join(profile, 'favorites')
+base_url = 'https://api2.iheart.com/api/v2'
+cache = StorageServer.StorageServer(addon_id, 1)
+
+if not xbmcvfs.exists(addon_profile):
+    xbmcvfs.mkdirs(addon_profile)
+favorites_file = os.path.join(addon_profile, 'favorites')
 fav_list = []
 if xbmcvfs.exists(favorites_file):
     fav_list = eval(open(favorites_file).read())
 
 
-def addon_log(string):
-    try:
-        log_message = string.encode('utf-8', 'ignore')
-    except:
-        log_message = 'addonException: addon_log: %s' %format_exc()
-    xbmc.log("[%s-%s]: %s" %(addon_id, addon_version, log_message),
-                             level=xbmc.LOGNOTICE)
+def addon_log(string, debug_level=False):
+    if debug_level:
+        debug_level = xbmc.LOGNOTICE
+    else:
+        debug_level = xbmc.LOGDEBUG
+    xbmc.log("[{0}-{1}]: {2}".format(
+        addon_id, addon_version, string), level=debug_level)
 
 
-def make_request(url, data=None, headers={}):
-    addon_log('Request URL: %s' %url)
+def make_request(url, is_json=True):
     try:
-        req = urllib2.Request(url, data, headers)
-        response = urllib2.urlopen(req)
-        data = response.read()
-        response.close()
-        return data
-    except urllib2.URLError, e:
-        addon_log( 'We failed to open "%s".' %url)
-        if hasattr(e, 'reason'):
-            addon_log('We failed to reach a server.')
-            addon_log('Reason: %s' %e.reason)
-        if hasattr(e, 'code'):
-            addon_log('We failed with error code - %s.' %e.code)
+        res = requests.get(url)
+        if not res.status_code == requests.codes.ok:
+            addon_log('Bad status code: {}'.format(res.status_code))
+            res.raise_for_status()
+        if not res.encoding == 'utf-8':
+            res.encoding = 'utf-8'
+        if is_json:
+            return res.json()
+        else:
+            return res.text
+    except requests.exceptions.HTTPError as error:
+        addon_log('We failed to open %s.' % url, True)
+        addon_log('HTTPError: %s' % error, True)
 
 
 def get_stations(data=None):
     if data is None:
-        url = base_url + '/v2/recs/genre?genreId=&offset=0&limit=24'
-        data = json.loads(make_request(url))
+        # function was called from display_main cache.cacheFunction
+        # this returns geo located results for the main plugin directoy
+        url = '%s/recs/genre?genreId=&offset=0&limit=24' % base_url
+        data = make_request(url)
     station_list = []
-    if data.has_key('values'):
+    if 'values' in data:
+        addon_log('VALUE Data: %s' % data)
         for i in data['values']:
             item = {}
-            if i['content'].has_key('streams'):
-                item['label'] = i['label'].encode('utf-8')
+            if 'streams' in i['content']:
+                item['label'] = i['label']
                 item['sub_label'] = i['subLabel']
                 item['id'] = i['content']['id']
                 item['genre'] = i['content']['genres'][0]['name']
@@ -76,19 +75,20 @@ def get_stations(data=None):
                 item['streams'] = i['content']['streams']
                 station_list.append(item)
         return station_list
-    elif data.has_key('hits'):
+    elif 'hits' in data:
+        addon_log('HITS Data: %s' % data)
         for i in data['hits']:
             item = {}
-            if i.has_key('streams'):
-                item['label'] = i['name'].encode('utf-8')
+            if 'streams' in i:
+                item['label'] = i['name']
                 item['sub_label'] = i['description']
                 item['id'] = i['id']
                 item['genre'] = i['genres'][0]['name']
                 item['thumb'] = i['logo']
                 item['streams'] = i['streams']
                 station_list.append(item)
-            elif i.has_key('content') and i['stationType'] == 'LIVE':
-                item['label'] = i['content'][0]['name'].encode('utf-8')
+            elif 'content' in i and i['stationType'] == 'LIVE':
+                item['label'] = i['content'][0]['name']
                 item['sub_label'] = i['content'][0]['description']
                 item['id'] = i['id']
                 item['genre'] = i['content'][0]['genres'][0]['name']
@@ -98,67 +98,81 @@ def get_stations(data=None):
         return station_list
 
 
-def get_stw_stream(url):
-    data = BeautifulStoneSoup(make_request(url))
-    server_url = ('http://%s/%s' %
-            (data('server')[0].ip.string, data.mount.string))
-    return server_url
-
-
-def get_talk_categories():
-    return json.loads(make_request(base_url + '/v1/talk/getCategories'))
-
-
 def display_main():
-    add_dir('Menu', '', 'menu', addon_icon)
+    add_dir('Menu', 'Menu', 'menu', addon_icon)
     display_stations(cache.cacheFunction(get_stations))
 
 
 def display_stations(station_list):
-    playable_streams = ['stw_stream', 'shoutcast_stream', 'pls_stream',
-            'flv_stream', 'rtmp_stream', 'hls_stream']
     for i in station_list:
-        stream_key = [x for x in playable_streams if i['streams'].has_key(x)]
-        if stream_key:
-            if stream_key[0] == 'stw_stream' and i['streams']['stw_stream']:
-                stream = '%s-STW' %i['streams'][stream_key[0]]
+        addon_log('STREAMS %s' % i["streams"])
+        # pls streams have media info in the correct format
+        if 'secure_pls_stream' in i['streams']:
+            stream = i['streams']['secure_pls_stream']
+        elif 'pls_stream' in i['streams']:
+            stream = i['streams']['pls_stream']
+        # shoutcast_streams have media info but not the correct format
+        elif 'secure_shoutcast_stream' in i['streams']:
+            stream = i['streams']['secure_shoutcast_stream']
+        elif 'shoutcast_stream' in i['streams']:
+            stream = i['streams']['shoutcast_stream']
+        else:
+            # hls streams don't seem to have media data
+            hls_streams = [i['streams'][x] for x in i['streams'] if
+                           i['streams'][x].endswith('m3u8')]
+            if hls_streams:
+                secure_stream = [x for x in hls_streams if x.startswith('https')]
+                if secure_stream:
+                    stream = secure_stream[0]
+                else:
+                    stream = hls_streams[-1]
             else:
-                stream = i['streams'][stream_key[0]]
-            try:
-                title = i['label'].encode('utf-8')
-            except:
-                addon_log(format_exc())
-                continue
-            info = {'title': title, 'genre': i['genre']}
-            add_dir(title, stream, 'play', i['thumb'], info, i['id'])
+                secure_streams = [i['streams'][x] for x in i['streams'] if
+                                  i['streams'][x].startswith('https')]
+                if secure_streams:
+                    stream = secure_streams[0]
+                else:
+                    stream = [i['streams'][x] for x in i['streams']][0]
+        title = i['label'].encode('utf-8')
+        addon_log('Stream URL: %s %s' % (title, stream.encode('utf-8')))
+        info = {'title': title, 'genre': i['genre']}
+        add_dir(title, stream, 'play', i['thumb'], info, i['id'])
+
+
+def get_talk_categories():
+    # cache.cacheFunction
+    return make_request('https://us.api.iheart.com/api/v3/podcast/categories')
 
 
 def get_markets():
-    url = base_url + '/v2/content/markets?countryCode=US&limit=10000'
-    return json.loads(make_request(url))
+    # cache.cacheFunction
+    url = '%s/content/markets?countryCode=US&limit=10000' % base_url
+    return make_request(url)
 
 
 def get_market(market_id):
-    url = (base_url + '/v2/content/liveStations?countryCode=US&'
-            'limit=10000&marketId=%s')
-    return json.loads(make_request(url %market_id))
+    # cache.cacheFunction
+    url = '%s/content/liveStations?countryCode=US&limit=10000&marketId=%s' % (base_url, market_id)
+    return make_request(url)
 
 
 def get_genres():
-    url = base_url + '/v2/content/liveStationGenres?countryCode=US&limit=10000'
-    return json.loads(make_request(url))
+    # cache.cacheFunction
+    url = '%s/content/liveStationGenres?countryCode=US&limit=10000' % base_url
+    return make_request(url)
 
 
 def get_genre(genre_id):
-    url = base_url + '/v2/content/liveStations?genreId=%s&limit=1000'
-    return json.loads(make_request(url %genre_id))
+    # cache.cacheFunction
+    url = '%s/content/liveStations?genreId=%s&limit=1000' % (base_url, genre_id)
+    return make_request(url)
 
 
 def display_markets():
     data = cache.cacheFunction(get_markets)
     dialog = xbmcgui.Dialog()
-    ret = dialog.select('Markets', ['%s, %s' %(i['city'], i['stateName']) for
-            i in data['hits']])
+    ret = dialog.select('Markets', ['%s, %s' % (i['city'], i['stateName']) for
+                                    i in data['hits']])
     if ret >= 0:
         display_market(data['hits'][ret]['marketId'])
 
@@ -177,33 +191,38 @@ def display_genres():
         display_stations(get_stations(data))
 
 
-def display_talk_categories():
+def display_podcast_categories():
     data = cache.cacheFunction(get_talk_categories)
     dialog = xbmcgui.Dialog()
     ret = dialog.select('Select', [i['name'] for i in data['categories']])
     if ret >= 0:
-        display_talk_category(data['categories'][ret]['categoryId'])
+        display_podcast_category(data['categories'][ret]['id'])
 
 
-def display_talk_category(categoryId):
-    url = ('%s/v1/talk/getCategory?categoryId=%s&includeShows=true' %
-            (base_url, categoryId))
-    data = json.loads(make_request(url))
-    for i in data['categories'][0]['shows']:
-        add_dir(i['title'].encode('utf-8'), i['id'], 'show', i['imagePath'])
+def display_podcast_category(category_id):
+    url = 'https://us.api.iheart.com/api/v3/podcast/categories/%s' % category_id
+    data = make_request(url)
+    for i in data['podcasts']:
+        add_dir(i['title'].encode('utf-8'), i['id'], 'podcast_episodes', i['imageUrl'])
 
 
-def display_show_episodes(show_id):
-    url = ('%s/v1/talk/getShow?showId=%s&offset=0&maxRows=20' %
-            (base_url, show_id))
-    data = json.loads(make_request(url))
-    for i in data['showRestValue']['allepisodes']:
-        add_dir(i['title'].encode('utf-8'), i['externalUrl'], 'play',
-                i['image'], {'duration': i['duration']})
+def display_podcast_episodes(show_id):
+    url = 'https://us.api.iheart.com/api/v3/podcast/podcasts/%s/episodes' % show_id
+    data = make_request(url)
+    addon_log('SHOW EPISODES Data: %s' % data)
+    for i in data['data']:
+        title = i['title'].encode('utf-8')
+        add_dir(title, i['id'], 'podcast', i['imageUrl'], {'duration': i['duration']})
+
+
+def resolve_podcast_url(show_id):
+    url = 'https://us.api.iheart.com/api/v3/podcast/episodes/%s' % show_id
+    data = make_request(url)
+    return data['episode']['mediaUrl']
 
 
 def display_menu():
-    menu_items = ['Favorites','Markets', 'Genres', 'Search', 'Podcasts']
+    menu_items = ['Favorites', 'Markets', 'Genres', 'Search', 'Podcasts']
     dialog = xbmcgui.Dialog()
     ret = dialog.select('Menu', menu_items)
     if ret >= 0:
@@ -216,84 +235,89 @@ def display_menu():
         elif menu_items[ret] == 'Favorites':
             get_favorites()
         elif menu_items[ret] == 'Podcasts':
-            display_talk_categories()
-        elif menu_items[ret] == 'Last Played':
-            get_last_played()
+            display_podcast_categories()
 
 
 def search():
-    keyboard = xbmc.Keyboard('','Search')
+    keyboard = xbmc.Keyboard('', 'Search for stations and podcasts')
     keyboard.doModal()
-    if (keyboard.isConfirmed() == False):
+    if not keyboard.isConfirmed():
         return
     search_q = keyboard.getText()
     if len(search_q) == 0:
         return
     search_params = {
-        'countryCode': 'US',
-        'keywords': search_q,
-        'queryArtist': 'false',
-        'queryBundle': 'false',
-        'queryFeaturedStation': 'true',
-        'queryKeyword': 'true',
-        'queryStation': 'true',
-        'queryTalkShow': 'false',
-        'queryTalkTheme': 'false',
-        'queryTrack': 'false',
-        'startIndex': '0'
-        }
-    search_url = ('%s/v1/catalog/searchAll?%s' %
-            (base_url, urllib.urlencode(search_params)))
-    data = json.loads(make_request(search_url))
-    if data.has_key('stations') and data['stations']:
-        get_live_stations(data['stations'])
+        "bundle": "true",
+        "keyword": "true",
+        "keywords": search_q,
+        "maxRows": "3",
+        "countryCode": "US",
+        "startIndex": "0",
+        "albums": "false",
+        "artist": "false",
+        "playlist": "false",
+        "station": "true",
+        "podcast": "true",
+        "track": "false"
+    }
+    search_url = ('https://us.api.iheart.com/api/v3/search/all?%s' %
+                  urlencode(search_params))
+    data = make_request(search_url)
+    addon_log('SEARCH Data: %s' % data)
+    if 'stations' in data['results'] and data['results']['stations']:
+        get_live_stations(data['results']['stations'])
+    if 'podcasts' in data['results'] and data['results']['podcasts']:
+        for i in data['results']['podcasts']:
+            add_dir(i['title'], i['id'], 'podcast_episodes', i['image'])
 
 
 def get_live_stations(station_list):
     for i in station_list:
-        sdata = (json.loads(make_request('%s/v2/content/liveStations/%s' %
-                (base_url, i['id']))))
-        display_stations(get_stations(sdata))
+        data = make_request('%s/content/liveStations/%s' % (base_url, i["id"]))
+        display_stations(get_stations(data))
 
 
-def add_dir(name, url, mode, iconimage, info={}, station_id=None):
-    params = {'name': name, 'url': url, 'mode': mode, 'id': station_id}
-    url = '%s?%s' %(sys.argv[0], urllib.urlencode(params))
-    listitem = xbmcgui.ListItem(name, iconImage=iconimage,
-            thumbnailImage=iconimage)
+def parse_pls(url):
+    data = make_request(url, False)
+    streams = re.findall('=(.+?)\r\n', data)
+    if streams:
+        return streams[0]
+
+
+def add_dir(name, url, dir_mode, icon, info=None, station_id=None):
+    if info is None:
+        info = {}
+    url_params = {'name': name, 'url': url, 'mode': dir_mode, 'id': station_id}
+    plugin_url = '%s?%s' % (sys.argv[0], urlencode(url_params))
+    listitem = xbmcgui.ListItem(name)
+    listitem.setArt({'thumb': icon, 'fanart': addon_fanart})
     is_folder = True
-    if mode == 'play':
+    if dir_mode in ['play', 'podcast']:
         is_folder = False
         listitem.setProperty('IsPlayable', 'true')
-        fav_mode = 'add_favorite'
-        menu_title = 'Add add-on favorite'
-        if name in str(fav_list):
-            fav_mode = 'rm_favorite'
-            menu_title = 'Remove add-on favorite'
-        contextMenu = [(menu_title,
-                        'RunPlugin(plugin://plugin.audio.iheart/?'
-                        'mode=%s&name=%s&url=%s&iconimage=%s)'
-                        %(fav_mode, name, params['url'], iconimage))]
-        listitem.addContextMenuItems(contextMenu)
-    listitem.setProperty("Fanart_Image", addon_fanart)
-    listitem.setInfo(type = 'music', infoLabels = info)
-    xbmcplugin.addDirectoryItem(int(sys.argv[1]), url, listitem, is_folder)
+    fav_mode = 'add_favorite'
+    menu_title = 'Add add-on favorite'
+    if name in repr(fav_list):
+        fav_mode = 'rm_favorite'
+        menu_title = 'Remove add-on favorite'
+    context_args = ('RunAddon(plugin.audio.iheart, mode=%s&name=%s&url=%s&icon=%s)' %
+                    (fav_mode, quote_plus(name), url, icon))
+    context_menu = [(menu_title, context_args)]
+    listitem.addContextMenuItems(context_menu)
+    listitem.setInfo(type='music', infoLabels=info)
+    xbmcplugin.addDirectoryItem(int(sys.argv[1]), plugin_url, listitem, is_folder)
 
 
-def get_time():
-    return str(int(time.time() * 1000))
-
-
-def add_favorite(name, url, iconimage):
-    fav_list.append((name, url, iconimage))
+def add_favorite(name, url, icon):
+    fav_list.append((name, url, icon))
     a = open(favorites_file, "w")
     a.write(repr(fav_list))
     a.close()
 
 
 def get_favorites():
-    for name, item_url, iconimage in fav_list:
-        add_dir(name, item_url, 'play', iconimage)
+    for name, item_url, icon in fav_list:
+        add_dir(name, item_url, 'play', icon)
 
 
 def rm_favorite(fav_name):
@@ -305,14 +329,12 @@ def rm_favorite(fav_name):
     a = open(favorites_file, "w")
     a.write(repr(fav_list))
     a.close()
-    xbmc.executebuiltin('Container.Refresh')
 
 
-def resolve_url(stream_url, station_id):
+def resolve_url(stream_url):
     success = False
-    resolved_url = ''
-    if stream_url.endswith('-STW'):
-        resolved_url = get_stw_stream(stream_url.rstrip('-STW'))
+    if stream_url.endswith('.pls'):
+        resolved_url = parse_pls(stream_url)
     else:
         resolved_url = stream_url
     if resolved_url:
@@ -321,28 +343,22 @@ def resolve_url(stream_url, station_id):
     xbmcplugin.setResolvedUrl(int(sys.argv[1]), success, item)
 
 
-def get_params():
-    p = parse_qs(sys.argv[2][1:])
-    for i in p.keys():
-        p[i] = p[i][0]
-    return p
+params = ()
+if '=' in sys.argv[2]:
+    params = {i.split('=')[0]: i.split('=')[1] for
+              i in unquote_plus(sys.argv[2])[1:].split('&')}
+    addon_log('Addon args: %s' % params)
 
-
-params = get_params()
-addon_log("params: %s" %params)
-
-try:
+mode = None
+if 'mode' in params:
     mode = params['mode']
-except:
-    mode = None
-    addon_log('get root directory')
 
 if mode is None:
     display_main()
     xbmcplugin.endOfDirectory(int(sys.argv[1]))
 
 elif mode == 'play':
-    resolve_url(params['url'], params['id'])
+    resolve_url(params['url'])
 
 elif mode == 'markets':
     display_markets()
@@ -352,16 +368,23 @@ elif mode == 'market':
     display_market(params['url'])
     xbmcplugin.endOfDirectory(int(sys.argv[1]))
 
-elif mode == 'show':
-    display_show_episodes(params['url'])
+elif mode == 'podcast_episodes':
+    display_podcast_episodes(params['url'])
     xbmcplugin.endOfDirectory(int(sys.argv[1]))
+
+elif mode == 'podcast':
+    resolve_url(resolve_podcast_url(params['url']))
 
 elif mode == 'menu':
     display_menu()
     xbmcplugin.endOfDirectory(int(sys.argv[1]))
 
 elif mode == 'add_favorite':
-    add_favorite(params['name'], params['url'], params['iconimage'])
+    add_favorite(params['name'], params['url'], params['icon'])
+    get_favorites()
+    xbmcplugin.endOfDirectory(int(sys.argv[1]))
 
 elif mode == 'rm_favorite':
     rm_favorite(params['name'])
+    get_favorites()
+    xbmcplugin.endOfDirectory(int(sys.argv[1]))
