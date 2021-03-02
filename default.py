@@ -317,7 +317,11 @@ def add_favorite(name, url, icon):
 
 def get_favorites():
     for name, item_url, icon in fav_list:
-        add_dir(name, item_url, 'play', icon)
+        mode = 'play'
+        if not item_url.startswith('http'):
+            # it's a podcast
+            mode = 'podcast_episodes'
+        add_dir(name, item_url, mode, icon)
 
 
 def rm_favorite(fav_name):
