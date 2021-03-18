@@ -407,11 +407,11 @@ def resolve_url(stream_url):
 params = ()
 if '=' in sys.argv[2]:
     try:
-        params = {i.split('=')[0]: i.split('=')[1] for
-                  i in unquote_plus(sys.argv[2])[1:].split('&')}
+        params = {i.split('=')[0]: unquote_plus(i.split('=')[1]) for
+                  i in sys.argv[2][1:].split('&')}
         addon_log('Addon args: {}'.format(params), True)
-    except IndexError:
-        addon_log('IndexError; args: {}'.format(sys.argv[2]))
+    except IndexError as err:
+        addon_log('IndexError {}; args: {}'.format(err, sys.argv[2]))
 
 mode = None
 if 'mode' in params:
