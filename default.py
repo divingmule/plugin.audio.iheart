@@ -221,7 +221,6 @@ def set_market():
 
 
 def get_genre(genre_id):
-    # cache.cacheFunction
     url = '{}/v2/content/liveStations?genreId={}&limit=1000'.format(base_url, genre_id)
     return make_request(url)
 
@@ -233,9 +232,7 @@ def get_genres():
 
 
 def display_genres():
-    # data = cache.cacheFunction(get_genres)
-    url = '{}/api/v3/catalog/genres?genreType=liveStation'.format(country_api_url)
-    data = make_request(url)
+    data = cache.cacheFunction(get_genres)
     dialog = xbmcgui.Dialog()
     ret = dialog.select('Genres', [i['genreName'] for i in data['genres']])
     if ret >= 0:
@@ -402,7 +399,7 @@ def resolve_url(stream_url):
         success = True
     item = xbmcgui.ListItem(path=resolved_url)
     xbmcplugin.setResolvedUrl(int(sys.argv[1]), success, item)
-    
+
 
 params = ()
 if '=' in sys.argv[2]:
