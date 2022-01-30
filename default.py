@@ -316,8 +316,8 @@ def search():
     addon_log(f'SEARCH Data: {data}')
     if 'stations' in data['results'] and data['results']['stations']:
         for i in data['results']['stations']:
-            data = make_request(f'{base_url}/v2/content/liveStations/{i["id"]}')
-            display_stations(get_stations(data))
+            station_data = make_request(f'{base_url}/v2/content/liveStations/{i["id"]}')
+            display_stations(get_stations(station_data))
     if 'podcasts' in data['results'] and data['results']['podcasts']:
         for i in data['results']['podcasts']:
             add_dir(i['title'], i['id'], 'podcast_episodes', i['image'])

@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <addon id="plugin.audio.iheart"
        name="iHeartRadio"
-       version="2.0.1"
+       version="2.0.2"
        provider-name="divingmule">
   <requires>
     <import addon="xbmc.python" version="3.0.0"/>
@@ -24,7 +24,9 @@
     <source>https://github.com/divingmule/plugin.audio.iheart</source>
     <forum>http://forum.xbmc.org/showthread.php?tid=170721</forum>
     <website>http://iheart.com</website>
-    <news>v2.0.1 (03/19/2021)
+    <news>v2.0.2 (01/30/2022)
+	  [fix] Bug in search function
+	  v2.0.1 (03/19/2021)
       [new] Adds support for Canada, Australia, Mexico, New Zealand and podcasts world wide.
     </news>
     <assets>
